@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pypsamcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "PyPSA MCP: PyPSA Energy Modeling for LLMs"
 authors = [
     {name = "Carlos Gaete", email = "cdgaete@gmail.com"},
