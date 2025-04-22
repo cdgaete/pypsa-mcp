@@ -247,7 +247,7 @@ Optimize the model using the GLPK solver and summarize the key findings.
 
 Below is a demo video showing how to use PyPSA MCP with Claude. The video demonstrates creating a simple two-bus model, running power flow calculations, and performing optimization.
 
-https://github.com/cdgaete/pypsa-mcp/raw/main/pypsa_mcp_example.mp4
+https://raw.githubusercontent.com/cdgaete/pypsa-mcp/refs/heads/main/pypsa_mcp_example.mp4
 
 ### Demo Prompt
 
