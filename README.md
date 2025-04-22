@@ -95,7 +95,7 @@ pypsamcp
    ```json
    "mcpServers": {
      "PyPSA MCP":{
-       "command": "uv",
+       "command": "uv",  # Sometimes /path/to/local/uv (remove this comment)
        "args": [
          "run",
          "--with",
