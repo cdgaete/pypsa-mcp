@@ -12,7 +12,7 @@ from fastmcp import FastMCP
 
 
 mcp = FastMCP(
-    "PyPSA Energy Modeler",
+    "pypsa-mcp",
     on_duplicate_tools="error",
     description="Create, analyze, and optimize energy system models using PyPSA",
     dependencies=["pypsa", "pandas", "numpy"]
