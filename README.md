@@ -4,6 +4,32 @@ PyPSA MCP is a Model Context Protocol (MCP) server for creating, analyzing, and 
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that enables Large Language Models (LLMs) like Claude to interact with PyPSA for energy model creation and analysis via natural language.
 
+## Demo Example
+
+Below is a demo video showing how to use PyPSA MCP with Claude. The video demonstrates creating a simple two-bus model, running power flow calculations, and performing optimization.
+
+<video controls>
+    <source src="pypsa_mcp_example.mp4" type="video/mp4">
+    Your browser does not support the video tag.
+</video>
+
+### Demo Prompt
+
+You can try this exact prompt with Claude to reproduce the example shown in the video:
+
+```text
+I'd like to build an energy system model and perform optimization using PyPSA. Please help me with these steps: 
+1. Create a simple two-bus model with: 
+   1. Two buses at (0,0) and (100,0) with 220 kV nominal voltage 
+   2. A generator at bus1 with 100 MW capacity and 50 €/MWh cost 
+   3. A load at bus2 with 80 MW demand
+   4. 24 hourly snapshots for January 1, 2025
+2. Run a power flow calculation to verify the model 
+3. Perform optimization with the highs solver using the kirchhoff formulation 
+4. Discuss the results
+```
+
+
 ## Overview
 
 PyPSA MCP provides a bridge between Large Language Models and PyPSA, allowing you to:
@@ -241,28 +267,6 @@ Run a power flow calculation on the current model and show me the results.
 
 ```text
 Optimize the model using the GLPK solver and summarize the key findings.
-```
-
-## Demo Example
-
-Below is a demo video showing how to use PyPSA MCP with Claude. The video demonstrates creating a simple two-bus model, running power flow calculations, and performing optimization.
-
-https://raw.githubusercontent.com/cdgaete/pypsa-mcp/refs/heads/main/pypsa_mcp_example.mp4
-
-### Demo Prompt
-
-You can try this exact prompt with Claude to reproduce the example shown in the video:
-
-```text
-I'd like to build an energy system model and perform optimization using PyPSA. Please help me with these steps: 
-1. Create a simple two-bus model with: 
-   1. Two buses at (0,0) and (100,0) with 220 kV nominal voltage 
-   2. A generator at bus1 with 100 MW capacity and 50 €/MWh cost 
-   3. A load at bus2 with 80 MW demand
-   4. 24 hourly snapshots for January 1, 2025
-2. Run a power flow calculation to verify the model 
-3. Perform optimization with the highs solver using the kirchhoff formulation 
-4. Discuss the results
 ```
 
 ## License
