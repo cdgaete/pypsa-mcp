@@ -243,6 +243,28 @@ Run a power flow calculation on the current model and show me the results.
 Optimize the model using the GLPK solver and summarize the key findings.
 ```
 
+## Demo Example
+
+Below is a demo video showing how to use PyPSA MCP with Claude. The video demonstrates creating a simple two-bus model, running power flow calculations, and performing optimization.
+
+![Demo Video](https://github.com/cdgaete/pypsa-mcp/raw/main/pypsa_mcp_example.mp4)
+
+### Demo Prompt
+
+You can try this exact prompt with Claude to reproduce the example shown in the video:
+
+```text
+I'd like to build an energy system model and perform optimization using PyPSA. Please help me with these steps: 
+1. Create a simple two-bus model with: 
+   1. Two buses at (0,0) and (100,0) with 220 kV nominal voltage 
+   2. A generator at bus1 with 100 MW capacity and 50 €/MWh cost 
+   3. A load at bus2 with 80 MW demand
+   4. 24 hourly snapshots for January 1, 2025
+2. Run a power flow calculation to verify the model 
+3. Perform optimization with the highs solver using the kirchhoff formulation 
+4. Discuss the results
+```
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
