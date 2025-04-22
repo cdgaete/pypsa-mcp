@@ -8,11 +8,6 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that e
 
 Below is a demo video showing how to use PyPSA MCP with Claude. The video demonstrates creating a simple two-bus model, running power flow calculations, and performing optimization.
 
-<video controls>
-    <source src="pypsa_mcp_example.mp4" type="video/mp4">
-    Your browser does not support the video tag.
-</video>
-
 ### Demo Prompt
 
 You can try this exact prompt with Claude to reproduce the example shown in the video:
