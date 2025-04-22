@@ -13,7 +13,6 @@ def main():
     
     try:
         print("Starting PyPSA MCP Server...")
-        print(f"Available tools: {len(mcp.tools)}")
         
         mcp.run()
         return 0
