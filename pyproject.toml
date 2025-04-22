@@ -1,0 +1,78 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pypsamcp"
+version = "0.1.0"
+description = "PyPSA MCP: PyPSA Energy Modeling for LLMs"
+authors = [
+    {name = "Carlos Gaete", email = "cdgaete@gmail.com"},
+]
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+keywords = ["mcp", "pypsa", "energy", "modeling", "claude", "ai", "assistant"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "fastmcp>=2.2.0",
+    "pypsa>=0.33.0",
+    "pandas>=2.2.1",
+    "numpy>=2.2.1",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/cdgaete/pypsa-mcp"
+"Bug Tracker" = "https://github.com/cdgaete/pypsa-mcp/issues"
+"Source Code" = "https://github.com/cdgaete/pypsa-mcp"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.5",
+    "black>=24.3.0",
+    "ruff>=0.3.4",
+    "build>=1.2.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["pypsamcp*"]
+namespaces = false
+
+[project.scripts]
+pypsamcp = "pypsamcp.server:main"
+
+# Override the extra-index-url from the global config
+[tool.uv]
+index-url = "https://pypi.org/simple"
+extra-index-url = []
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+include = '\.pyi?$'
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = [
+    "E", 
+    "F", 
+    "N", 
+    "B", 
+    "C4", 
+    "UP"
+]
+ignore = ["E402", "E501"]  # Allow long lines
