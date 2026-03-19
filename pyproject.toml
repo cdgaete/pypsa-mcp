@@ -28,7 +28,7 @@ classifiers = [
 ]
 dependencies = [
     "fastmcp>=2.2.0",
-    "pypsa>=0.33.0",
+    "pypsa>=1.1.0",
     "highspy>=1.10.0",
 ]
 
@@ -40,6 +40,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3.5",
+    "pytest-asyncio>=0.23.0",
     "black>=24.3.0",
     "ruff>=0.3.4",
     "build>=1.2.1",
@@ -57,6 +58,9 @@ pypsamcp = "pypsamcp.server:main"
 [tool.uv]
 index-url = "https://pypi.org/simple"
 extra-index-url = []
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [tool.black]
 line-length = 100
