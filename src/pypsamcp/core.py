@@ -5,18 +5,46 @@ This module provides the core functionality for the PyPSA MCP server.
 It includes the MCP object and global model storage.
 """
 
+import logging
+import os
+import sys
 import numpy as np
 import pandas as pd
 import pypsa
 import textwrap
+from contextlib import contextmanager
 from fastmcp import FastMCP
+
+# Redirect Python loggers to stderr
+logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
+for name in ("pypsa", "linopy", "highs"):
+    logging.getLogger(name).handlers = [logging.StreamHandler(sys.stderr)]
+    logging.getLogger(name).propagate = False
+
+
+@contextmanager
+def stdout_to_stderr():
+    """Redirect fd 1 (stdout) to fd 2 (stderr) at the OS level.
+    
+    HiGHS writes directly via C stdio, bypassing Python's sys.stdout,
+    so we must redirect at the file descriptor level to keep the MCP
+    stdio stream clean.
+    """
+    stdout_fd = sys.stdout.fileno()
+    saved_fd = os.dup(stdout_fd)
+    try:
+        sys.stdout.flush()
+        os.dup2(sys.stderr.fileno(), stdout_fd)
+        yield
+    finally:
+        sys.stdout.flush()
+        os.dup2(saved_fd, stdout_fd)
+        os.close(saved_fd)
 
 
 mcp = FastMCP(
     "pypsa-mcp",
-    on_duplicate_tools="error",
-    description="Create, analyze, and optimize energy system models using PyPSA",
-    dependencies=["pypsa", "pandas", "numpy"]
+    on_duplicate="error",
 )
 
 MODELS = {}
@@ -440,6 +468,8 @@ async def run_powerflow(
     """
     try:
         network = get_model(model_id)
+        with stdout_to_stderr():
+            network.sanitize()
         
         # Validate snapshot if provided
         if snapshot is not None:
@@ -448,7 +478,8 @@ async def run_powerflow(
                 return {"error": f"Snapshot '{snapshot}' not found in model '{model_id}'."}
             
             # Run power flow for a specific snapshot
-            network.pf(snapshot_dt)
+            with stdout_to_stderr():
+                network.pf(snapshot_dt)
             
             # Collect results
             results = {
@@ -460,7 +491,8 @@ async def run_powerflow(
             }
         else:
             # Run power flow for all snapshots
-            network.pf()
+            with stdout_to_stderr():
+                network.pf()
             
             # Collect results for all snapshots (could be large)
             results = {
@@ -499,7 +531,7 @@ async def run_optimization(
     """
     try:
         network = get_model(model_id)
-        
+
         # Validate formulation
         if formulation not in ["kirchhoff", "ptdf"]:
             return {"error": f"Invalid formulation '{formulation}'. Must be 'kirchhoff' or 'ptdf'."}
@@ -519,12 +551,15 @@ async def run_optimization(
         if not hasattr(network, 'results'):
             network.results = {}
             
-        # Run the optimization using the modern optimize method instead of lopf
-        network.optimize(
-            solver_name=solver_name,
-            formulation=formulation,
-            extra_functionality=extra_func
-        )
+        # Wrap the entire solve pipeline — sanitize, linopy model build, and HiGHS
+        # all write to stdout at the C level, so redirect fd 1 for the whole sequence
+        with stdout_to_stderr():
+            network.sanitize()
+            network.optimize(
+                solver_name=solver_name,
+                formulation=formulation,
+                extra_functionality=extra_func
+            )
         
         # Collect optimization results
         results = {

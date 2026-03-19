@@ -12,7 +12,7 @@ def main():
     """Main entry point for the PyPSA MCP server."""
     
     try:
-        print("Starting PyPSA MCP Server...")
+        print("Starting PyPSA MCP Server...", file=sys.stderr)
         
         mcp.run()
         return 0
