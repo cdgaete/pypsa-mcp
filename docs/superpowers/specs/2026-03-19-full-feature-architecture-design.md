@@ -2,13 +2,15 @@
 
 **Date:** 2026-03-19
 **Status:** Approved
-**Target:** PyPSA 1.1.2, ≤ 20 registered tools (19 primary + 3 deprecated aliases)
+**Target:** PyPSA 1.1.2, 22 registered tools (19 primary + 3 deprecated aliases)
 
 ---
 
 ## Overview
 
-Refactor pypsa-mcp from 11 tools in a single `core.py` to 19 composable tools + 3 deprecated aliases across a modular file structure. Every PyPSA 1.1.2 capability is exposed through parameterized, multi-mode tools that stay within the 20-tool context window budget.
+Refactor pypsa-mcp from 11 tools in a single `core.py` to 19 composable tools + 3 deprecated aliases across a modular file structure. Every PyPSA 1.1.2 capability is exposed through parameterized, multi-mode tools.
+
+The 19 primary tools include 4 convenience wrappers (add_bus, add_generator, add_load, add_line) that are part of the core inventory but marked deprecated. The 3 additional deprecated aliases (set_snapshots, run_powerflow, run_optimization) bring the total to 22 registered tools.
 
 ## Module Structure
 
@@ -16,13 +18,13 @@ Refactor pypsa-mcp from 11 tools in a single `core.py` to 19 composable tools + 
 src/pypsamcp/
 ├── __init__.py
 ├── server.py                  # Entry point (unchanged)
-├── core.py                    # mcp, MODELS, helpers
+├── core.py                    # mcp, MODELS, helpers (imports tools/ at bottom)
 ├── tools/
-│   ├── __init__.py            # Imports all tool modules to trigger registration
+│   ├── __init__.py            # Imports all tool modules to trigger @mcp.tool() registration
 │   ├── management.py          # create_energy_model, list_models, delete_model, export_model_summary
 │   ├── discovery.py           # list_component_types, describe_component
 │   ├── components.py          # add_component, update_component, remove_component, query_components
-│   ├── convenience.py         # add_bus, add_generator, add_load, add_line (thin delegates)
+│   ├── convenience.py         # add_bus, add_generator, add_load, add_line (thin delegates, deprecated)
 │   ├── time_config.py         # configure_time
 │   ├── simulation.py          # run_simulation
 │   ├── statistics.py          # get_statistics
@@ -31,13 +33,19 @@ src/pypsamcp/
 │   └── deprecated.py          # set_snapshots, run_powerflow, run_optimization (aliases)
 ```
 
+**Registration wiring:** `core.py` defines `mcp` and helpers, then at the bottom imports `pypsamcp.tools` to trigger all `@mcp.tool()` decorators. `server.py` imports `mcp` from `core` as before — no change needed.
+
 ## Design Decisions
 
 1. **Module split (not monolith):** core.py would grow to 1500-2000+ lines. Split by domain keeps files focused and editable.
 2. **`pypsa>=1.1.0`:** New tools use 1.x APIs (statistics accessor, cluster accessor, set_investment_periods, optimize.optimize_mga). Clean break from 0.x.
-3. **Thin convenience wrappers:** `add_bus`, `add_generator`, `add_load`, `add_line` repackage args and delegate to `add_component`. Marked deprecated.
+3. **Thin convenience wrappers:** `add_bus`, `add_generator`, `add_load`, `add_line` repackage args and delegate to `add_component`. Marked deprecated — will be removed in a future release.
 4. **Deprecated aliases:** `set_snapshots` → `configure_time(mode="snapshots")`, `run_powerflow` → `run_simulation(mode="pf")`, `run_optimization` → `run_simulation(mode="optimize")`. Each returns a `deprecation_notice` field.
 5. **Helper rename:** `get_model` → `get_energy_model` throughout.
+6. **CamelCase canonical for component_type:** `"Bus"`, `"Generator"`, etc. match PyPSA docs and `network.add("Bus", ...)`. Build a lookup dict mapping both CamelCase and lowercase list_name forms.
+7. **No `**kwargs` in tool signatures:** MCP tools require fully typed parameters for JSON Schema generation. Multi-mode tools declare all mode-specific params explicitly with `None` defaults.
+8. **`optimize()` returns `(status, condition)` tuple:** Capture return value directly, do not rely on `network.results`.
+9. **Exclude internal component types:** `SubNetwork` and `Shape` are managed internally by PyPSA. Excluded from `list_component_types` and rejected by `add_component`.
 
 ## What Does NOT Change
 
@@ -48,11 +56,17 @@ src/pypsamcp/
 - `server.py` entry point
 - All tools remain `async def` returning `dict`
 
+## Return Shape Convention
+
+All tools return either:
+- **Success:** dict with at minimum a `"message"` key, plus domain-specific fields
+- **Error:** `{"error": str}` with an actionable error message
+
 ---
 
-## Tool Inventory (19 + 3 deprecated)
+## Tool Inventory (19 primary + 3 deprecated = 22 total)
 
-### GROUP 1 — Model Management (4 tools)
+### GROUP 1 — Model Management (4 tools) — `tools/management.py`
 
 #### `create_energy_model(model_id, name=None, override=False) → dict`
 Creates a new PyPSA network and stores in MODELS. Unchanged from current.
@@ -66,10 +80,12 @@ Removes a model. Unchanged from current.
 #### `export_model_summary(model_id) → dict`
 Extended to report: `has_investment_periods`, `has_scenarios`, `has_risk_preference`, `investment_periods`, `scenarios` in addition to existing fields.
 
-### GROUP 2 — Discovery (2 tools)
+### GROUP 2 — Discovery (2 tools) — `tools/discovery.py`
 
 #### `list_component_types() → dict`
-Returns catalog of all 13 PyPSA component types with one-line descriptions. No arguments, no model required. Always fast.
+Returns catalog of 13 user-facing PyPSA component types (excluding internal SubNetwork and Shape). No arguments, no model required. Always fast.
+
+CamelCase `type` is the canonical form used across all tools. `list_name` provided for reference.
 
 ```json
 {
@@ -92,12 +108,14 @@ Returns catalog of all 13 PyPSA component types with one-line descriptions. No a
 ```
 
 #### `describe_component(component_type, include_defaults=True) → dict`
-Returns full input-parameter schema for one component type, introspected live from `network.components[component_type]['attrs']`.
+Returns full input-parameter schema for one component type, introspected live from the PyPSA component attribute system.
+
+**Note on PyPSA 1.x API:** The `.attrs` accessor is deprecated in favor of `.defaults`. Implementation should use the non-deprecated API or suppress the warning. The filtering logic (status, varying columns) applies to whichever accessor is used.
 
 **Internal logic:**
 1. Use any existing model from MODELS, or instantiate a throwaway `pypsa.Network()`.
-2. Validate `component_type`; return error with valid list if unknown.
-3. Load attrs. Filter to rows where `status` starts with `"Input"`.
+2. Validate `component_type` against the 13 user-facing types; return error with valid list if unknown.
+3. Load component attributes. Filter to rows where `status` starts with `"Input"`.
 4. Partition into:
    - `required`: `status == "Input (required)"` — always `name` and bus reference(s).
    - `static`: `status == "Input (optional)"` and `varying == False`.
@@ -108,14 +126,21 @@ Returns full input-parameter schema for one component type, introspected live fr
    "Pass 'static' and 'varying' params to add_component(params={}). Pass time series for 'varying' params to add_component(time_series={})."
    ```
 
-### GROUP 3 — Component CRUD (4 tools)
+### GROUP 3 — Component CRUD (4 tools) — `tools/components.py`
 
 #### `add_component(model_id, component_type, component_id, params, time_series) → dict`
 Adds any PyPSA component with full parameter coverage.
 
+**Arguments:**
+- `model_id: str`
+- `component_type: str` — CamelCase canonical form
+- `component_id: str`
+- `params: dict | None` — static/scalar input parameters
+- `time_series: dict | None` — `{attr: [v1, v2, ...]}` for varying input fields
+
 **Validation (fail-fast, in order):**
 1. Model exists.
-2. `component_type` valid.
+2. `component_type` valid (one of 13 user-facing types).
 3. All `params` keys are `Input` attributes (not `Output`). Return named bad keys + suggest `describe_component`.
 4. Bus references resolve. Bus attr names per type:
    - Single `bus`: Generator, Load, StorageUnit, Store, ShuntImpedance.
@@ -127,9 +152,9 @@ Adds any PyPSA component with full parameter coverage.
 7. If `time_series` non-empty, `len(network.snapshots) > 0`. Return actionable error if not.
 
 **Execution:**
-1. Type-cast each param from `attrs.loc[attr, 'typ']`. Handle `bool` explicitly.
+1. Type-cast each param from attribute type info. Handle `bool` explicitly.
 2. `network.add(component_type, component_id, **params)`.
-3. For each `(attr, values)` in `time_series`: assign `pd.Series(values, index=network.snapshots[:len(values)])` to `getattr(network, f"{list_name}_t")[attr][component_id]`.
+3. For each `(attr, values)` in `time_series`: assign `pd.Series(values, index=network.snapshots[:len(values)])` to the appropriate dynamic DataFrame.
 4. Return full serialized component row + count.
 
 #### `update_component(model_id, component_type, component_id, params, time_series) → dict`
@@ -141,81 +166,208 @@ Removes a component. Returns remaining count.
 #### `query_components(model_id, component_type, filters) → dict`
 Read component state. `filters` is optional `{attr: value}` dict. Returns serialized DataFrame rows + count.
 
-### GROUP 3b — Convenience Wrappers (4 tools, deprecated)
+**Arguments (all explicit, no kwargs):**
+- `model_id: str`
+- `component_type: str`
+- `filters: dict | None = None`
 
-`add_bus`, `add_generator`, `add_load`, `add_line` — narrow signatures, delegate internally to `add_component`. Each returns a `deprecation_notice` field. Will be removed in a future release.
+### GROUP 3b — Convenience Wrappers (4 tools, deprecated) — `tools/convenience.py`
 
-### GROUP 4 — Time & Investment Structure (1 tool)
+`add_bus`, `add_generator`, `add_load`, `add_line` — narrow signatures, delegate internally to `add_component`. Each returns a `deprecation_notice` field. Will be removed in a future release. These are counted within the 19 primary tools.
 
-#### `configure_time(model_id, mode, **kwargs) → dict`
+### GROUP 4 — Time & Investment Structure (1 tool) — `tools/time_config.py`
 
-**`mode="snapshots"`**
-- `snapshots: list[str]` — ISO datetime strings.
-- `weightings: dict | None` — optional, keys `"objective"`, `"generators"`, `"stores"`.
+#### `configure_time(model_id, mode, ...) → dict`
 
-**`mode="investment_periods"`**
-- `periods: list[int]` — e.g. `[2025, 2030, 2035]`.
-- Snapshots must be set first.
+All parameters declared explicitly with `None` defaults (no `**kwargs`):
 
-**`mode="scenarios"`**
-- `scenarios: dict | list | None`
+```python
+async def configure_time(
+    model_id: str,
+    mode: str,
+    # mode="snapshots"
+    snapshots: list[str] | None = None,
+    weightings: dict | None = None,
+    # mode="investment_periods"
+    periods: list[int] | None = None,
+    # mode="scenarios"
+    scenarios: dict | list | None = None,
+    # mode="risk_preference"
+    alpha: float | None = None,
+    omega: float | None = None,
+) -> dict:
+```
 
-**`mode="risk_preference"`**
-- `alpha: float` — CVaR confidence level.
-- `omega: float` — weight on CVaR term.
-- Requires `has_scenarios == True`.
+**Mode behavior:**
+- `"snapshots"` — `network.set_snapshots(pd.to_datetime(snapshots))`. Optional weightings.
+- `"investment_periods"` — `network.set_investment_periods(periods)`. Snapshots must be set first.
+- `"scenarios"` — `network.set_scenarios(scenarios)`.
+- `"risk_preference"` — `network.set_risk_preference(alpha, omega)`. Requires has_scenarios.
 
 **Return:** mode, message, has_investment_periods, has_scenarios, has_risk_preference, snapshot_count, investment_period_weightings.
 
-### GROUP 5 — Simulation (1 tool)
+### GROUP 5 — Simulation (1 tool) — `tools/simulation.py`
 
-#### `run_simulation(model_id, mode, **kwargs) → dict`
+#### `run_simulation(model_id, mode, ...) → dict`
 
-**Modes:**
-- `"pf"` — Non-linear AC power flow. kwargs: snapshots, distribute_slack, slack_weights, x_tol.
-- `"lpf"` — Linear power flow. kwargs: snapshots.
-- `"optimize"` — Standard optimization. kwargs: solver_name, formulation, multi_investment_periods, transmission_losses, linearized_unit_commitment, assign_all_duals, compute_infeasibilities, solver_options, extra_functionality.
-- `"mga"` — Modelling-to-Generate-Alternatives. kwargs: slack, sense, weights, solver_name.
-- `"security_constrained"` — N-1 security. kwargs: branch_outages, solver_name.
-- `"rolling_horizon"` — Rolling horizon dispatch. kwargs: horizon, overlap, solver_name.
-- `"transmission_expansion_iterative"` — Iterative transmission expansion. kwargs: msq_threshold, min_iterations, max_iterations, solver_name.
-- `"optimize_and_pf"` — Optimize then non-linear power flow.
+All parameters declared explicitly (no `**kwargs`):
+
+```python
+async def run_simulation(
+    model_id: str,
+    mode: str = "optimize",
+    # pf/lpf
+    snapshots: list[str] | None = None,
+    distribute_slack: bool = False,
+    slack_weights: str = "p_set",
+    x_tol: float = 1e-6,
+    # optimize
+    solver_name: str = "highs",
+    formulation: str = "kirchhoff",
+    multi_investment_periods: bool = False,
+    transmission_losses: int | bool = False,
+    linearized_unit_commitment: bool = False,
+    assign_all_duals: bool = False,
+    compute_infeasibilities: bool = False,
+    solver_options: dict | None = None,
+    extra_functionality: str | None = None,
+    # mga
+    slack: float = 0.05,
+    sense: str = "min",
+    weights: dict | None = None,
+    # security_constrained
+    branch_outages: list[str] | None = None,
+    # rolling_horizon
+    horizon: int = 100,
+    overlap: int = 0,
+    # transmission_expansion_iterative
+    msq_threshold: float = 0.05,
+    min_iterations: int = 1,
+    max_iterations: int = 100,
+) -> dict:
+```
+
+**Mode → PyPSA method mapping:**
+
+| Mode | PyPSA method |
+|------|-------------|
+| `"pf"` | `network.pf()` |
+| `"lpf"` | `network.lpf()` |
+| `"optimize"` | `network.optimize()` |
+| `"mga"` | `network.optimize.optimize_mga()` |
+| `"security_constrained"` | `network.optimize.optimize_security_constrained()` |
+| `"rolling_horizon"` | `network.optimize.optimize_with_rolling_horizon()` |
+| `"transmission_expansion_iterative"` | `network.optimize.optimize_transmission_expansion_iteratively()` |
+| `"optimize_and_pf"` | `network.optimize.optimize_and_run_non_linear_powerflow()` |
+
+**Result extraction:** `network.optimize()` returns `(status, termination_condition)` tuple. Capture directly — do not rely on `network.results` dict.
 
 All modes wrapped in `stdout_to_stderr()`. `extra_functionality` uses same `textwrap.indent` + `exec` pattern as current.
 
 **Return:** mode, status, termination_condition, objective_value, summary (dispatch, expansion, flows, shadow prices).
 
-### GROUP 6 — Statistics & Results (1 tool)
+### GROUP 6 — Statistics & Results (1 tool) — `tools/statistics.py`
 
-#### `get_statistics(model_id, metric, **kwargs) → dict`
+#### `get_statistics(model_id, metric, ...) → dict`
 
-**19 metrics:** system_cost, capex, opex, fom, overnight_cost, installed_capacity, optimal_capacity, expanded_capacity, installed_capex, expanded_capex, capacity_factor, curtailment, energy_balance, supply, withdrawal, revenue, market_value, prices, transmission, all.
+All parameters declared explicitly:
 
-**Shared kwargs:** components, carrier, bus_carrier, groupby, aggregate_across_components, nice_names, drop_zero.
+```python
+async def get_statistics(
+    model_id: str,
+    metric: str = "system_cost",
+    components: list[str] | None = None,
+    carrier: list[str] | None = None,
+    bus_carrier: list[str] | None = None,
+    groupby: str | list[str] = "carrier",
+    aggregate_across_components: bool = False,
+    nice_names: bool | None = None,
+    drop_zero: bool | None = None,
+) -> dict:
+```
 
-**Requires:** `network.is_solved == True`.
+**19 metrics** (all map to `network.statistics.<metric>(**kwargs)`): system_cost, capex, opex, fom, overnight_cost, installed_capacity, optimal_capacity, expanded_capacity, installed_capex, expanded_capex, capacity_factor, curtailment, energy_balance, supply, withdrawal, revenue, market_value, prices, transmission.
 
-### GROUP 7 — Clustering / Reduction (1 tool)
+**Special metric `"all"`:** Loops over all 19 metrics and returns combined dict. Not a PyPSA method — implemented as iteration.
 
-#### `cluster_network(model_id, domain, method, output_model_id, **kwargs) → dict`
+**Requires:** model must be solved. Return clear error if not.
 
-**`domain="spatial"`** methods: kmeans, hac, greedy_modularity. kwargs: n_clusters, bus_weightings, line_length_factor, affinity, linkage. Shared cluster_options: with_time, aggregate_generators_weighted, scale_link_capital_costs.
+### GROUP 7 — Clustering / Reduction (1 tool) — `tools/clustering.py`
 
-**`domain="temporal"`** methods: resample, downsample, segment, snapshot_map. kwargs: offset, stride, num_segments, solver, snapshot_map.
+#### `cluster_network(model_id, domain, method, output_model_id, ...) → dict`
+
+All parameters declared explicitly:
+
+```python
+async def cluster_network(
+    model_id: str,
+    domain: str,
+    method: str,
+    output_model_id: str,
+    # spatial
+    n_clusters: int | None = None,
+    bus_weightings: dict | None = None,
+    line_length_factor: float = 1.0,
+    affinity: str = "euclidean",
+    linkage: str = "ward",
+    # spatial cluster_options
+    with_time: bool = True,
+    aggregate_generators_weighted: bool = False,
+    scale_link_capital_costs: bool = True,
+    # temporal
+    offset: str | None = None,
+    stride: int | None = None,
+    num_segments: int | None = None,
+    solver: str = "highs",
+    snapshot_map: dict | None = None,
+) -> dict:
+```
+
+**`domain="spatial"`** methods: kmeans, hac, greedy_modularity.
+- `bus_weightings`: if `None`, auto-compute from load at each bus.
+
+**`domain="temporal"`** methods: resample, downsample, segment, snapshot_map.
 
 Result stored as new model in MODELS[output_model_id].
 
-### GROUP 8 — I/O & Network Operations (1 tool)
+### GROUP 8 — I/O & Network Operations (1 tool) — `tools/io.py`
 
-#### `network_io(model_id, operation, **kwargs) → dict`
+#### `network_io(model_id, operation, ...) → dict`
 
-**Operations:** export_netcdf, export_csv, export_hdf5, import_netcdf, import_csv, merge, copy, slice, consistency_check.
+All parameters declared explicitly:
 
-Each operation has specific kwargs per the spec. Import operations create new models. Merge/copy/slice store results in MODELS[output_model_id].
+```python
+async def network_io(
+    model_id: str,
+    operation: str,
+    # export
+    path: str | None = None,
+    float32: bool = False,
+    compression: dict | None = None,
+    export_standard_types: bool = False,
+    # import
+    skip_time: bool = False,
+    # merge
+    other_model_id: str | None = None,
+    output_model_id: str | None = None,
+    components_to_skip: list[str] | None = None,
+    with_time: bool = True,
+    # copy/subset
+    snapshots: list[str] | None = None,
+    investment_periods: list | None = None,
+    buses: list[str] | None = None,
+) -> dict:
+```
+
+**Operations:** export_netcdf, export_csv, import_netcdf, import_csv, merge, copy, consistency_check.
+
+**Removed from original spec:**
+- `export_hdf5` — requires extra dependencies (`tables`/`h5py`) not in pyproject.toml.
+- `slice` — `network.slice()` does not exist in PyPSA 1.1.2. Use `copy` with `snapshots`/`buses` params instead.
 
 ---
 
-## Deprecated Aliases (3 tools)
+## Deprecated Aliases (3 tools) — `tools/deprecated.py`
 
 | Old name | Delegates to | Notes |
 |----------|-------------|-------|
