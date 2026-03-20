@@ -9,6 +9,44 @@ from pypsamcp.core import (
     stdout_to_stderr,
 )
 
+import pandas as pd
+
+
+def _patch_single_column_pnl(network):
+    """Work around PyPSA 1.1.2 MGA bug with single-column pnl DataFrames.
+
+    MGA post-processing calls _set_dynamic_data which does:
+        c.dynamic[attr].loc[idx, cols] = df
+    When df has shape (N,1), pandas raises 'setting an array element with a
+    sequence' due to a broadcasting mismatch. This only affects components
+    with exactly one member that has time-varying data.
+
+    Fix: for each single-column pnl DataFrame, add a zero-filled dummy column.
+    Returns a cleanup function that removes the dummies after MGA completes.
+    """
+    patches = []  # list of (pnl_accessor, attr, dummy_col_name) to undo
+
+    for comp_name in ["loads", "generators", "storage_units", "stores", "links", "lines"]:
+        pnl = getattr(network, f"{comp_name}_t", None)
+        if pnl is None:
+            continue
+        for attr in list(pnl.keys()):
+            df = pnl[attr]
+            if df.empty or df.shape[1] != 1:
+                continue
+            # Single-column — add a zero-filled dummy
+            dummy_col = f"__mga_pad_{comp_name}_{attr}__"
+            pnl[attr][dummy_col] = 0.0
+            patches.append((pnl, attr, dummy_col))
+
+    def cleanup():
+        for pnl, attr, dummy_col in patches:
+            if dummy_col in pnl[attr].columns:
+                pnl[attr] = pnl[attr].drop(columns=[dummy_col])
+
+    return cleanup
+
+
 VALID_MODES = {
     "pf",
     "lpf",
@@ -260,22 +298,17 @@ async def _run_mga(
     if weights:
         mga_kwargs["weights"] = weights
 
+    # Workaround for PyPSA 1.1.2 bug: MGA post-processing crashes when any
+    # component's pnl DataFrame has exactly 1 column (shape (N,1) vs (N,)
+    # broadcasting failure in pandas). We add a temporary dummy component to
+    # pad single-column pnl DataFrames, then remove it after MGA completes.
+    _mga_cleanup = _patch_single_column_pnl(network)
+
     try:
         with stdout_to_stderr():
             network.optimize.optimize_mga(**mga_kwargs)
-    except ValueError as mga_err:
-        err_msg = str(mga_err)
-        if "setting an array element with a sequence" in err_msg:
-            return {
-                "error": "MGA post-processing failed due to a known PyPSA 1.1.2 bug "
-                "when loads have time-varying p_set stored as dynamic data. "
-                "Workaround: set load p_set as a static scalar value, or use the "
-                "'optimize' mode which is not affected.",
-                "mode": "mga",
-                "baseline_status": status,
-                "baseline_objective": float(network.objective),
-            }
-        raise
+    finally:
+        _mga_cleanup()
 
     summary = _collect_optimization_results(network)
     return {

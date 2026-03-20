@@ -74,7 +74,7 @@ class TestBug2MGAPostProcessing:
     This is an upstream PyPSA bug — our code should catch it gracefully."""
 
     async def test_mga_with_time_series_load(self):
-        """MGA with time-varying load should not crash with 'setting an array element'."""
+        """MGA with time-varying load should work (single-column pnl patched)."""
         await create_energy_model("m")
         await configure_time("m", "snapshots",
             snapshots=["2024-01-01 00:00", "2024-01-01 06:00",
@@ -89,11 +89,7 @@ class TestBug2MGAPostProcessing:
             {"bus": "b0"}, {"p_set": [100, 150, 120, 80]})
 
         r = await run_simulation("m", mode="mga", slack=0.05)
-        # Should either succeed or return a clear error about the upstream issue
-        assert isinstance(r, dict)
-        if "error" in r:
-            assert "setting an array element" not in r["error"], (
-                f"Raw numpy error leaked to user: {r['error']}")
+        assert r.get("status") == "ok", f"MGA failed: {r}"
 
     async def test_mga_with_static_load_works(self):
         """MGA without time-varying load should work fine."""
