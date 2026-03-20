@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from pypsamcp.core import get_energy_model, mcp
+from pypsamcp.core import convert_to_serializable, get_energy_model, mcp
 
 
 @mcp.tool()
@@ -41,6 +41,12 @@ async def configure_time(
         if mode == "snapshots":
             if snapshots is None:
                 return {"error": "snapshots parameter is required for mode='snapshots'."}
+            if getattr(network, "has_investment_periods", False):
+                return {
+                    "error": "Cannot set snapshots after investment periods are configured. "
+                    "Set snapshots first, then call configure_time(mode='investment_periods'). "
+                    "To start over, create a new model with create_energy_model(override=True)."
+                }
             network.set_snapshots(pd.to_datetime(snapshots))
             if weightings:
                 for key, val in weightings.items():
@@ -93,7 +99,14 @@ async def configure_time(
 
         if has_ip:
             ipw = network.investment_period_weightings
-            result["investment_period_weightings"] = ipw.to_dict()
+            # Convert to serializable — may contain datetime64 values
+            serialized = {}
+            for col in ipw.columns:
+                serialized[col] = {
+                    str(k): float(v) if isinstance(v, (int, float)) else str(v)
+                    for k, v in ipw[col].items()
+                }
+            result["investment_period_weightings"] = serialized
 
         return result
 

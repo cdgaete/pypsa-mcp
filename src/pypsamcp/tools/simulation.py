@@ -68,16 +68,17 @@ def _collect_optimization_results(network) -> dict:
 def _build_extra_functionality(code_string: str):
     """Compile a code string into a callable extra_functionality function.
 
-    The code_string should define logic that uses `network` and `snapshots`
-    variables, which will be available in scope when executed.
+    The code_string can use either `network` or `n` to refer to the PyPSA
+    network (both are available for compatibility with PyPSA conventions).
+    `snapshots` is also available.
     """
 
     def extra_functionality(network, snapshots):
         indented = textwrap.indent(code_string, "    ")
-        func_code = f"def _user_func(network, snapshots):\n{indented}"
+        func_code = f"def _user_func(network, n, snapshots):\n{indented}"
         local_ns = {}
         exec(func_code, {}, local_ns)  # noqa: S102
-        local_ns["_user_func"](network, snapshots)
+        local_ns["_user_func"](network, network, snapshots)
 
     return extra_functionality
 
@@ -259,8 +260,22 @@ async def _run_mga(
     if weights:
         mga_kwargs["weights"] = weights
 
-    with stdout_to_stderr():
-        network.optimize.optimize_mga(**mga_kwargs)
+    try:
+        with stdout_to_stderr():
+            network.optimize.optimize_mga(**mga_kwargs)
+    except ValueError as mga_err:
+        err_msg = str(mga_err)
+        if "setting an array element with a sequence" in err_msg:
+            return {
+                "error": "MGA post-processing failed due to a known PyPSA 1.1.2 bug "
+                "when loads have time-varying p_set stored as dynamic data. "
+                "Workaround: set load p_set as a static scalar value, or use the "
+                "'optimize' mode which is not affected.",
+                "mode": "mga",
+                "baseline_status": status,
+                "baseline_objective": float(network.objective),
+            }
+        raise
 
     summary = _collect_optimization_results(network)
     return {

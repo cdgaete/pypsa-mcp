@@ -155,10 +155,10 @@ async def add_component(
 
     # 7. Time series requires explicitly configured snapshots (not the default "now")
     if time_series:
-        if not isinstance(network.snapshots, pd.DatetimeIndex):
+        if not isinstance(network.snapshots, (pd.DatetimeIndex, pd.MultiIndex)):
             return {
                 "error": "Cannot set time series: no snapshots configured. "
-                "Use configure_time(mode='snapshots') first."
+                "Use configure_time(mode='snapshots') or configure_time(mode='investment_periods') first."
             }
 
     # Execute
