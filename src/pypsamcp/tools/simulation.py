@@ -148,22 +148,22 @@ async def run_simulation(
             )
         elif mode == "security_constrained":
             return await _run_security_constrained(
-                network, solver_name, formulation, solver_options,
+                network, solver_name, solver_options,
                 extra_functionality, branch_outages,
             )
         elif mode == "rolling_horizon":
             return await _run_rolling_horizon(
-                network, solver_name, formulation, solver_options,
+                network, solver_name, solver_options,
                 extra_functionality, horizon, overlap,
             )
         elif mode == "transmission_expansion_iterative":
             return await _run_transmission_expansion(
-                network, solver_name, formulation, solver_options,
+                network, solver_name, solver_options,
                 extra_functionality, msq_threshold, min_iterations, max_iterations,
             )
         elif mode == "optimize_and_pf":
             return await _run_optimize_and_pf(
-                network, solver_name, formulation, solver_options,
+                network, solver_name, solver_options,
                 extra_functionality,
             )
     except Exception as e:
@@ -274,13 +274,12 @@ async def _run_mga(
 
 
 async def _run_security_constrained(
-    network, solver_name, formulation, solver_options,
+    network, solver_name, solver_options,
     extra_functionality_code, branch_outages,
 ):
     """Run security-constrained optimization."""
     kwargs = {
         "solver_name": solver_name,
-        "formulation": formulation,
     }
     if solver_options:
         kwargs["solver_options"] = solver_options
@@ -304,13 +303,12 @@ async def _run_security_constrained(
 
 
 async def _run_rolling_horizon(
-    network, solver_name, formulation, solver_options,
+    network, solver_name, solver_options,
     extra_functionality_code, horizon, overlap,
 ):
     """Run rolling horizon optimization."""
     kwargs = {
         "solver_name": solver_name,
-        "formulation": formulation,
         "horizon": horizon,
         "overlap": overlap,
     }
@@ -334,13 +332,12 @@ async def _run_rolling_horizon(
 
 
 async def _run_transmission_expansion(
-    network, solver_name, formulation, solver_options,
+    network, solver_name, solver_options,
     extra_functionality_code, msq_threshold, min_iterations, max_iterations,
 ):
     """Run iterative transmission expansion optimization."""
     kwargs = {
         "solver_name": solver_name,
-        "formulation": formulation,
         "msq_threshold": msq_threshold,
         "min_iterations": min_iterations,
         "max_iterations": max_iterations,
@@ -365,13 +362,12 @@ async def _run_transmission_expansion(
 
 
 async def _run_optimize_and_pf(
-    network, solver_name, formulation, solver_options,
+    network, solver_name, solver_options,
     extra_functionality_code,
 ):
     """Run optimization followed by non-linear power flow."""
     kwargs = {
         "solver_name": solver_name,
-        "formulation": formulation,
     }
     if solver_options:
         kwargs["solver_options"] = solver_options

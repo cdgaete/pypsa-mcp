@@ -63,3 +63,34 @@ class TestRunSimulationPF:
     async def test_lpf(self, pf_model):
         result = await run_simulation("test", mode="lpf")
         assert result["mode"] == "lpf"
+
+
+class TestFormulationNotLeaked:
+    """formulation param must only be passed to network.optimize(), not to
+    rolling_horizon/security_constrained/etc which forward it as a solver
+    option causing HiGHS errors."""
+
+    async def test_rolling_horizon_kwargs_exclude_formulation(self):
+        """_run_rolling_horizon should not include formulation in kwargs."""
+        from pypsamcp.tools.simulation import _run_rolling_horizon
+        import inspect
+        sig = inspect.signature(_run_rolling_horizon)
+        assert "formulation" not in sig.parameters
+
+    async def test_security_constrained_kwargs_exclude_formulation(self):
+        from pypsamcp.tools.simulation import _run_security_constrained
+        import inspect
+        sig = inspect.signature(_run_security_constrained)
+        assert "formulation" not in sig.parameters
+
+    async def test_transmission_expansion_kwargs_exclude_formulation(self):
+        from pypsamcp.tools.simulation import _run_transmission_expansion
+        import inspect
+        sig = inspect.signature(_run_transmission_expansion)
+        assert "formulation" not in sig.parameters
+
+    async def test_optimize_and_pf_kwargs_exclude_formulation(self):
+        from pypsamcp.tools.simulation import _run_optimize_and_pf
+        import inspect
+        sig = inspect.signature(_run_optimize_and_pf)
+        assert "formulation" not in sig.parameters
