@@ -293,12 +293,42 @@ class TestStatisticsAllMetrics:
         "installed_capacity", "optimal_capacity", "expanded_capacity",
         "installed_capex", "expanded_capex", "capacity_factor", "curtailment",
         "energy_balance", "supply", "withdrawal", "revenue", "market_value",
-        "prices", "transmission",
+        "transmission",
     ])
     async def test_individual_metric(self, solved, metric):
         result = await get_statistics("m", metric)
         assert "error" not in result, f"Metric '{metric}' failed: {result}"
         assert "result" in result
+
+    async def test_prices_with_valid_groupby(self, solved):
+        """prices only accepts groupby='bus_carrier' or groupby=False."""
+        result = await get_statistics("m", "prices", groupby="bus_carrier")
+        assert "error" not in result
+        assert "result" in result
+
+    async def test_prices_with_invalid_groupby_returns_actionable_error(self, solved):
+        """prices with groupby='carrier' should fail with a recommendation."""
+        result = await get_statistics("m", "prices", groupby="carrier")
+        assert "error" in result
+        assert "groupby" in result["error"]
+        assert "bus_carrier" in result["error"]
+
+    async def test_prices_rejects_aggregate_across_components(self, solved):
+        """prices with aggregate_across_components=True should fail."""
+        result = await get_statistics("m", "prices",
+            groupby="bus_carrier", aggregate_across_components=True)
+        assert "error" in result
+        assert "aggregate_across_components" in result["error"]
+
+    async def test_all_metrics_reports_errors(self, solved):
+        """'all' metric should report per-metric errors, not swallow them."""
+        result = await get_statistics("m", "all")
+        assert "result" in result
+        # prices should have failed with default groupby="carrier"
+        assert result["result"]["prices"] is None
+        assert "metric_errors" in result
+        assert "prices" in result["metric_errors"]
+        assert "groupby" in result["metric_errors"]["prices"]
 
     async def test_aggregate_across_components(self, solved):
         result = await get_statistics("m", "supply", aggregate_across_components=True)

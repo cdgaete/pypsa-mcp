@@ -10,31 +10,51 @@ VALID_METRICS = [
     "prices", "transmission",
 ]
 
+# Metrics that do NOT accept aggregate_across_components
+_NO_AGGREGATE_ACROSS = {"prices"}
 
-import inspect
+# Metrics that only accept specific groupby values
+_RESTRICTED_GROUPBY = {
+    "prices": {"bus_carrier", False},
+}
 
 
-def _call_metric(network, metric, kwargs):
+def _build_kwargs_for_metric(metric, shared_kwargs):
+    """Build metric-specific kwargs, rejecting incompatible options up front."""
+    kwargs = dict(shared_kwargs)
+
+    if metric in _NO_AGGREGATE_ACROSS and kwargs.get("aggregate_across_components"):
+        raise ValueError(
+            f"Metric '{metric}' does not support aggregate_across_components. "
+            f"Call get_statistics(metric='{metric}', aggregate_across_components=False) instead."
+        )
+    if metric in _NO_AGGREGATE_ACROSS:
+        kwargs.pop("aggregate_across_components", None)
+
+    if metric in _RESTRICTED_GROUPBY:
+        allowed = _RESTRICTED_GROUPBY[metric]
+        groupby = kwargs.get("groupby")
+        if groupby not in allowed:
+            allowed_str = ", ".join(repr(v) for v in sorted(allowed, key=str))
+            raise ValueError(
+                f"Metric '{metric}' only supports groupby={allowed_str}. "
+                f"Got groupby={groupby!r}. "
+                f"Call get_statistics(metric='{metric}', groupby='bus_carrier') instead."
+            )
+
+    return kwargs
+
+
+def _call_metric(network, metric, shared_kwargs):
     """Call a single statistics metric and return the serialized result.
 
-    Some metrics (e.g. prices, transmission) don't accept all shared kwargs
-    like aggregate_across_components or certain groupby values. We try with
-    full kwargs first, then progressively strip incompatible ones on error.
+    Raises ValueError with an actionable message if the metric does not
+    accept the provided kwargs.
     """
+    kwargs = _build_kwargs_for_metric(metric, shared_kwargs)
     method = getattr(network.statistics, metric)
-    try:
-        result = method(**kwargs)
-        return convert_to_serializable(result)
-    except TypeError:
-        # Strip aggregate_across_components and retry
-        stripped = {k: v for k, v in kwargs.items() if k != "aggregate_across_components"}
-        try:
-            result = method(**stripped)
-            return convert_to_serializable(result)
-        except (TypeError, ValueError):
-            # Last resort: call with no kwargs
-            result = method()
-            return convert_to_serializable(result)
+    result = method(**kwargs)
+    return convert_to_serializable(result)
 
 
 @mcp.tool()
@@ -84,38 +104,48 @@ async def get_statistics(
         }
 
     # Build shared kwargs, only including non-None values
-    kwargs = {"groupby": groupby, "aggregate_across_components": aggregate_across_components}
+    shared_kwargs = {
+        "groupby": groupby,
+        "aggregate_across_components": aggregate_across_components,
+    }
     if components is not None:
-        kwargs["components"] = components
+        shared_kwargs["components"] = components
     if carrier is not None:
-        kwargs["carrier"] = carrier
+        shared_kwargs["carrier"] = carrier
     if bus_carrier is not None:
-        kwargs["bus_carrier"] = bus_carrier
+        shared_kwargs["bus_carrier"] = bus_carrier
     if nice_names is not None:
-        kwargs["nice_names"] = nice_names
+        shared_kwargs["nice_names"] = nice_names
     if drop_zero is not None:
-        kwargs["drop_zero"] = drop_zero
+        shared_kwargs["drop_zero"] = drop_zero
 
     try:
         if metric == "all":
             combined = {}
+            errors = {}
             for m in VALID_METRICS:
                 try:
-                    combined[m] = _call_metric(network, m, kwargs)
-                except Exception:
+                    combined[m] = _call_metric(network, m, shared_kwargs)
+                except Exception as e:
                     combined[m] = None
-            return {
+                    errors[m] = str(e)
+            result = {
                 "metric": "all",
                 "model_id": model_id,
                 "result": combined,
             }
+            if errors:
+                result["metric_errors"] = errors
+            return result
         else:
-            result = _call_metric(network, metric, kwargs)
+            result = _call_metric(network, metric, shared_kwargs)
             return {
                 "metric": metric,
                 "model_id": model_id,
                 "result": result,
                 "unit_note": "Currency units depend on the cost inputs used when building the model.",
             }
+    except ValueError as e:
+        return {"error": str(e)}
     except Exception as e:
         return {"error": str(e)}
