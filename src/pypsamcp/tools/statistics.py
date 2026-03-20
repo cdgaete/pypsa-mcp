@@ -11,11 +11,30 @@ VALID_METRICS = [
 ]
 
 
+import inspect
+
+
 def _call_metric(network, metric, kwargs):
-    """Call a single statistics metric and return the serialized result."""
+    """Call a single statistics metric and return the serialized result.
+
+    Some metrics (e.g. prices, transmission) don't accept all shared kwargs
+    like aggregate_across_components or certain groupby values. We try with
+    full kwargs first, then progressively strip incompatible ones on error.
+    """
     method = getattr(network.statistics, metric)
-    result = method(**kwargs)
-    return convert_to_serializable(result)
+    try:
+        result = method(**kwargs)
+        return convert_to_serializable(result)
+    except TypeError:
+        # Strip aggregate_across_components and retry
+        stripped = {k: v for k, v in kwargs.items() if k != "aggregate_across_components"}
+        try:
+            result = method(**stripped)
+            return convert_to_serializable(result)
+        except (TypeError, ValueError):
+            # Last resort: call with no kwargs
+            result = method()
+            return convert_to_serializable(result)
 
 
 @mcp.tool()
