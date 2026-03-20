@@ -27,11 +27,24 @@ def _get_component_attrs(network, canonical_type):
         return comp.attrs
 
 
-def _validate_params_are_input(attrs, params):
-    """Check that all param keys are Input attributes. Returns list of bad keys."""
+import re
+
+# Pattern for Link's dynamically expanded port attributes (bus2, bus3, efficiency2, etc.)
+_LINK_DYNAMIC_PORT_RE = re.compile(r"^(bus|efficiency|marginal_cost_quadratic)\d+$")
+
+
+def _validate_params_are_input(attrs, params, canonical_type=None):
+    """Check that all param keys are Input attributes. Returns list of bad keys.
+
+    For Link components, bus2+/efficiency2+ are dynamically expanded by PyPSA
+    and won't appear in the static attrs DataFrame — allow them through.
+    """
     bad_keys = []
     for key in params:
         if key not in attrs.index:
+            # Allow Link's dynamic port attributes (bus2, efficiency2, etc.)
+            if canonical_type == "Link" and _LINK_DYNAMIC_PORT_RE.match(key):
+                continue
             bad_keys.append(key)
         elif not attrs.loc[key, "status"].startswith("Input"):
             bad_keys.append(key)
@@ -113,7 +126,7 @@ async def add_component(
     attrs = _get_component_attrs(network, canonical)
 
     # 3. All params are Input attributes
-    bad_keys = _validate_params_are_input(attrs, params)
+    bad_keys = _validate_params_are_input(attrs, params, canonical)
     if bad_keys:
         return {
             "error": f"Invalid parameters {bad_keys}. These are not Input attributes. "
@@ -202,7 +215,7 @@ async def update_component(
     attrs = _get_component_attrs(network, canonical)
 
     # Validate params are Input
-    bad_keys = _validate_params_are_input(attrs, params)
+    bad_keys = _validate_params_are_input(attrs, params, canonical)
     if bad_keys:
         return {
             "error": f"Invalid parameters {bad_keys}. "

@@ -36,7 +36,7 @@ async def add_bus(
     """
     params = {"v_nom": v_nom, "x": x, "y": y, "carrier": carrier}
     if country is not None:
-        params["country"] = country
+        params["location"] = country  # PyPSA 1.x renamed 'country' to 'location'
     result = await _add_component(model_id, "Bus", bus_id, params)
     result["deprecation_notice"] = _DEPRECATION_NOTICE
     return result
