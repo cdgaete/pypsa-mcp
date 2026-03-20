@@ -120,12 +120,33 @@ def _cluster_spatial(n, method, n_clusters, line_length_factor, affinity, linkag
         return spatial.cluster_by_greedy_modularity(n_clusters=n_clusters)
 
 
+def _cast_pnl_to_float(n):
+    """Cast all integer-typed time-varying DataFrames to float64.
+
+    Resampling produces float averages that cannot be stored back into int64
+    columns. Pre-casting avoids the dtype mismatch error.
+    """
+    pnl_suffixes = [
+        "buses_t", "generators_t", "loads_t", "lines_t", "links_t",
+        "storage_units_t", "stores_t", "transformers_t",
+    ]
+    for suffix in pnl_suffixes:
+        pnl = getattr(n, suffix, None)
+        if pnl is None:
+            continue
+        for attr in list(pnl.keys()):
+            df = pnl[attr]
+            if not df.empty and df.dtypes.apply(lambda d: d.kind == "i").any():
+                pnl[attr] = df.astype(float)
+
+
 def _cluster_temporal(n, method, offset, stride, num_segments, solver, snapshot_map):
     """Run a temporal clustering method."""
     temporal = n.cluster.temporal
     if method == "resample":
         if offset is None:
             raise ValueError("offset is required for resample.")
+        _cast_pnl_to_float(n)
         return temporal.resample(offset=offset)
     elif method == "downsample":
         if stride is None:

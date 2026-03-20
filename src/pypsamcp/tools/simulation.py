@@ -1,6 +1,7 @@
 """Simulation tool: power flow, optimization, and advanced modes."""
 
 import textwrap
+from contextlib import contextmanager
 
 from pypsamcp.core import (
     mcp,
@@ -9,6 +10,7 @@ from pypsamcp.core import (
     stdout_to_stderr,
 )
 
+import numpy as np
 import pandas as pd
 
 
@@ -47,6 +49,56 @@ def _patch_single_column_pnl(network):
     return cleanup
 
 
+@contextmanager
+def _patch_set_dynamic_data():
+    """Patch PyPSA's _set_dynamic_data to handle single-column DataFrames.
+
+    PyPSA 1.1.2 has a bug where assigning a (N,1) DataFrame via
+    .loc[idx, cols] to another (M,1) DataFrame raises 'setting an array
+    element with a sequence' due to a pandas broadcasting mismatch.
+
+    This fix squeezes single-column solution DataFrames to Series before
+    assignment, which avoids the shape mismatch.
+    """
+    import pypsa.optimization.common as _common
+    import pypsa.optimization.optimize as _optimize
+
+    _original_common = _common._set_dynamic_data
+    _original_optimize = _optimize._set_dynamic_data
+
+    def _patched(n, component, attr, df):
+        c = n.components[component]
+        if (attr not in c.dynamic) or (c.dynamic[attr].empty):
+            c.dynamic[attr] = df.reindex(n.snapshots)
+        else:
+            if df.shape[1] == 1:
+                # Squeeze to Series to avoid (N,1) vs (N,) broadcast mismatch
+                col = df.columns[0]
+                c.dynamic[attr].loc[df.index, col] = df[col]
+            else:
+                c.dynamic[attr].loc[df.index, df.columns] = df
+
+        result = c.dynamic[attr].reindex(n.snapshots, level="snapshot", axis=0)
+        if n.has_scenarios:
+            expected_columns = pd.MultiIndex.from_product(
+                [n.scenarios, c.names], names=["scenario", "name"]
+            )
+            result = result.reindex(columns=expected_columns)
+        else:
+            result = result.reindex(c.names, level="name", axis=1)
+
+        c.dynamic[attr] = result.fillna(0.0)
+
+    # Patch both the source module and the importing module
+    _common._set_dynamic_data = _patched
+    _optimize._set_dynamic_data = _patched
+    try:
+        yield
+    finally:
+        _common._set_dynamic_data = _original_common
+        _optimize._set_dynamic_data = _original_optimize
+
+
 VALID_MODES = {
     "pf",
     "lpf",
@@ -71,6 +123,35 @@ def _collect_pf_results(network) -> dict:
     if not network.lines_t.p1.empty:
         summary["line_p1"] = convert_to_serializable(network.lines_t.p1)
     return summary
+
+
+def _is_infeasible(termination_condition: str) -> bool:
+    """Check if the optimization result indicates infeasibility."""
+    return termination_condition in ("infeasible", "infeasible_or_unbounded")
+
+
+def _build_infeasible_response(mode: str, status: str, termination_condition: str,
+                               compute_infeasibilities: bool = False) -> dict:
+    """Build a response dict for an infeasible optimization result.
+
+    Returns clean data instead of stale results from a prior solve.
+    """
+    resp = {
+        "mode": mode,
+        "status": status,
+        "termination_condition": termination_condition,
+        "objective_value": None,
+        "message": f"Optimization infeasible ({termination_condition}). "
+                   "No valid dispatch or expansion results available.",
+        "summary": {},
+    }
+    if compute_infeasibilities:
+        resp["infeasibility_note"] = (
+            "compute_infeasibilities=True requires the Gurobi solver in PyPSA 1.x. "
+            "With HiGHS, use load-shedding generators (high marginal_cost VoLL dummy "
+            "generators on each bus) to identify and quantify infeasible buses/hours."
+        )
+    return resp
 
 
 def _collect_optimization_results(network) -> dict:
@@ -256,6 +337,11 @@ async def _run_optimize(
     with stdout_to_stderr():
         status, termination_condition = network.optimize(**kwargs)
 
+    if _is_infeasible(termination_condition):
+        return _build_infeasible_response(
+            mode, status, termination_condition, compute_infeasibilities,
+        )
+
     summary = _collect_optimization_results(network)
     return {
         "mode": mode,
@@ -365,15 +451,28 @@ async def _run_rolling_horizon(
     if extra_functionality_code:
         kwargs["extra_functionality"] = _build_extra_functionality(extra_functionality_code)
 
-    with stdout_to_stderr():
-        status, termination_condition = network.optimize.optimize_with_rolling_horizon(**kwargs)
+    # Workaround for PyPSA 1.1.2 bug: assign_solution crashes with
+    # "setting an array element with a sequence" when any component's pnl
+    # DataFrame has exactly 1 column (shape (N,1) vs (N,) broadcasting
+    # mismatch in pandas). Patch _set_dynamic_data to squeeze single-column
+    # DataFrames before .loc assignment.
+    with _patch_set_dynamic_data(), stdout_to_stderr():
+        # optimize_with_rolling_horizon returns the Network, not (status, condition)
+        network.optimize.optimize_with_rolling_horizon(**kwargs)
+
+    # Infer status from network state after rolling horizon completes
+    obj = network.objective
+    if obj is not None and not (isinstance(obj, float) and obj != obj):
+        status, termination_condition = "ok", "optimal"
+    else:
+        status, termination_condition = "warning", "unknown"
 
     summary = _collect_optimization_results(network)
     return {
         "mode": "rolling_horizon",
         "status": status,
         "termination_condition": termination_condition,
-        "objective_value": float(network.objective),
+        "objective_value": float(obj) if obj is not None else None,
         "message": f"Rolling horizon optimization completed: {status} ({termination_condition})",
         "summary": summary,
     }

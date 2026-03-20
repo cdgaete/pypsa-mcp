@@ -51,28 +51,38 @@ def _validate_params_are_input(attrs, params, canonical_type=None):
     return bad_keys
 
 
+def _get_bus_names(network):
+    """Get bus names, handling both flat and MultiIndex (scenarios) indexes."""
+    idx = network.buses.index
+    if isinstance(idx, pd.MultiIndex) and "name" in idx.names:
+        return set(idx.get_level_values("name"))
+    return set(idx)
+
+
 def _validate_bus_references(network, canonical_type, params):
     """Check that bus references in params resolve to existing buses."""
     if canonical_type in _NO_BUS_CHECK:
         return None
 
+    bus_names = _get_bus_names(network)
+
     if canonical_type in _SINGLE_BUS:
         bus = params.get("bus")
-        if bus and bus not in network.buses.index:
+        if bus and bus not in bus_names:
             return f"Bus '{bus}' does not exist."
     elif canonical_type in _DUAL_BUS:
         for attr in ("bus0", "bus1"):
             bus = params.get(attr)
-            if bus and bus not in network.buses.index:
+            if bus and bus not in bus_names:
                 return f"Bus '{bus}' (from {attr}) does not exist."
     elif canonical_type in _MULTI_BUS:
         for attr in ("bus0", "bus1"):
             bus = params.get(attr)
-            if bus and bus not in network.buses.index:
+            if bus and bus not in bus_names:
                 return f"Bus '{bus}' (from {attr}) does not exist."
         for key, val in params.items():
             if key.startswith("bus") and key[3:].isdigit() and int(key[3:]) >= 2:
-                if val not in network.buses.index:
+                if val not in bus_names:
                     return f"Bus '{val}' (from {key}) does not exist."
     return None
 
@@ -140,7 +150,13 @@ async def add_component(
 
     # 5. Component ID not already in use
     df = getattr(network, list_name)
-    if component_id in df.index:
+    has_scenarios = isinstance(df.index, pd.MultiIndex) and "name" in df.index.names
+    if has_scenarios:
+        existing_names = df.index.get_level_values("name")
+        already_exists = component_id in existing_names
+    else:
+        already_exists = component_id in df.index
+    if already_exists:
         return {"error": f"{canonical} '{component_id}' already exists in model '{model_id}'."}
 
     # 6. Time series keys are varying Input attributes
@@ -172,10 +188,18 @@ async def add_component(
             ts_df[attr][component_id] = series
 
         df = getattr(network, list_name)
+        # With scenarios, the index is a MultiIndex (scenario, name) —
+        # use xs to select by component name across scenarios.
+        if isinstance(df.index, pd.MultiIndex) and "name" in df.index.names:
+            component_row = df.xs(component_id, level="name")
+            total = len(df.index.get_level_values("name").unique())
+        else:
+            component_row = df.loc[component_id]
+            total = len(df)
         return {
             "message": f"{canonical} '{component_id}' added to model '{model_id}'.",
-            "component_data": convert_to_serializable(df.loc[component_id]),
-            "total_count": len(df),
+            "component_data": convert_to_serializable(component_row),
+            "total_count": total,
         }
     except Exception as e:
         return {"error": str(e)}
