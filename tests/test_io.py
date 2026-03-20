@@ -66,6 +66,26 @@ class TestCopy:
         assert "copy1" in MODELS
         assert len(MODELS["copy1"].buses) == 1
 
+    async def test_copy_solved_network(self):
+        """Copying a solved network should work — clear solver model first."""
+        import pandas as pd
+        from pypsamcp.tools.simulation import run_simulation
+        n = pypsa.Network()
+        n.set_snapshots(pd.date_range("2024-01-01", periods=6, freq="h"))
+        n.add("Bus", "north", v_nom=110)
+        n.add("Bus", "south", v_nom=110)
+        n.add("Generator", "solar", bus="north", p_nom=200, marginal_cost=0,
+              p_nom_extendable=True, capital_cost=50000)
+        n.add("Generator", "gas", bus="south", p_nom=500, marginal_cost=40)
+        n.add("StorageUnit", "battery", bus="south", p_nom=50, max_hours=4)
+        n.add("Load", "demand", bus="south", p_set=100)
+        n.add("Line", "link", bus0="north", bus1="south", x=0.1, s_nom=100)
+        MODELS["complex"] = n
+        await run_simulation("complex", mode="optimize")
+        result = await network_io("complex", "copy", output_model_id="complex_copy")
+        assert "message" in result
+        assert "complex_copy" in MODELS
+
 
 class TestMerge:
     async def test_merge(self, simple_model):

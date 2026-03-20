@@ -103,6 +103,9 @@ async def network_io(
             network = get_energy_model(model_id)
             if not output_model_id:
                 return {"error": "output_model_id is required for copy"}
+            # Clear attached solver model if present (PyPSA refuses to copy with it)
+            if hasattr(network, "model") and hasattr(network.model, "solver_model"):
+                network.model.solver_model = None
             kwargs = {}
             if snapshots is not None:
                 kwargs["snapshots"] = pd.DatetimeIndex(snapshots)
